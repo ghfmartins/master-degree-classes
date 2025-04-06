@@ -7,9 +7,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define NUM_PROC 5
+#define NUM_PROC 3
 #define BASE_PORT 5000
 #define BUFFER_SIZE 256
+#define HEARTBEAT_INTERVAL 5  // segundos
 
 typedef struct {
     int id;
@@ -21,6 +22,7 @@ typedef struct {
 Processo processos[NUM_PROC];
 int meu_id;
 int lider_atual = -1;
+bool estou_em_eleicao = false;
 
 void enviar_mensagem(int destino_id, const char *mensagem) {
     int sockfd;
@@ -51,6 +53,7 @@ void anunciar_lider(int id_lider) {
 
 void *eleicao(void *arg) {
     int id_chamador = (int)(long)arg;
+    estou_em_eleicao = true;
     printf("🔔 Processo %d iniciou eleição.\n", id_chamador);
 
     bool alguem_respondeu = false;
@@ -61,13 +64,16 @@ void *eleicao(void *arg) {
         }
     }
 
+    sleep(2);  // espera resposta (simulação simples)
+
     if (!alguem_respondeu) {
         processos[id_chamador - 1].is_lider = true;
         lider_atual = id_chamador;
         printf("👑 Processo %d se tornou líder!\n", id_chamador);
-        anunciar_lider(id_chamador); // <-- NOVO: envia anúncio do líder
+        anunciar_lider(id_chamador);
     }
 
+    estou_em_eleicao = false;
     return NULL;
 }
 
@@ -92,8 +98,6 @@ void *escutar_mensagens(void *arg) {
         memset(buffer, 0, BUFFER_SIZE);
         read(newsockfd, buffer, BUFFER_SIZE);
 
-        printf("📥 Processo %d recebeu: %s\n", proc->id, buffer);
-
         if (strncmp(buffer, "ELEICAO", 7) == 0) {
             if (proc->ativo && proc->id > meu_id) {
                 printf("📩 Processo %d responde à eleição.\n", proc->id);
@@ -104,10 +108,43 @@ void *escutar_mensagens(void *arg) {
         } else if (strncmp(buffer, "LIDER:", 6) == 0) {
             int novo_lider = atoi(buffer + 6);
             lider_atual = novo_lider;
+            processos[novo_lider - 1].is_lider = true;
             printf("🧠 Processo %d reconhece que o novo líder é o Processo %d\n", meu_id, novo_lider);
+        } else if (strncmp(buffer, "PING", 4) == 0) {
+            if (proc->is_lider) {
+                enviar_mensagem(meu_id - 1, "PONG");
+            }
         }
 
         close(newsockfd);
+    }
+
+    return NULL;
+}
+
+void *monitorar_lider(void *arg) {
+    while (1) {
+        sleep(HEARTBEAT_INTERVAL);
+
+        if (lider_atual == meu_id || lider_atual == -1 || estou_em_eleicao)
+            continue;
+
+        // Tenta enviar "PING" para o líder atual
+        printf("📡 Processo %d verifica se o líder %d está vivo...\n", meu_id, lider_atual);
+        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in serv_addr;
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(processos[lider_atual - 1].port);
+        serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            printf("❌ Processo %d detectou falha do líder %d!\n", meu_id, lider_atual);
+            pthread_t t;
+            pthread_create(&t, NULL, eleicao, (void *)(long)meu_id);
+        } else {
+            send(sockfd, "PING", 4, 0);
+            close(sockfd);
+        }
     }
 
     return NULL;
@@ -128,8 +165,9 @@ int main(int argc, char *argv[]) {
         processos[i].is_lider = false;
     }
 
-    pthread_t escuta;
+    pthread_t escuta, monitor;
     pthread_create(&escuta, NULL, escutar_mensagens, &processos[meu_id - 1]);
+    pthread_create(&monitor, NULL, monitorar_lider, NULL);
 
     sleep(2);
     pthread_t inicio;

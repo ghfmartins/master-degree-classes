@@ -84,7 +84,7 @@ void* listener_thread(void* arg) {
         if (strcmp(msg, "ELECTION") == 0) {
             printf("📨 Recebi ELECTION de %d\n", sender_id);
 
-            // Se eu sou o líder, ignoro a eleição
+            // Se sou líder, ignoro eleição
             if (leader_id == process_id) {
                 printf("👑 Eu sou o líder atual. Ignorando ELECTION de %d.\n", sender_id);
             } else {
@@ -128,7 +128,7 @@ void initiate_election() {
         send_message(i, "ELECTION");
     }
 
-    // Espera por OK com timeout
+    // Espera por OK por 3 segundos
     time_t start = time(NULL);
     while (time(NULL) - start < 3) {
         if (received_ok) break;
@@ -138,13 +138,24 @@ void initiate_election() {
     waiting_for_ok = false;
 
     if (!received_ok) {
+        // Se ninguém respondeu, se declara líder
         printf("👑 Processo %d se declarou LÍDER\n", process_id);
         leader_id = process_id;
         broadcast("LEADER");
         election_in_progress = false;
     } else {
+        // Espera por anúncio de novo líder
         printf("⌛ Processo %d aguardando o novo líder...\n", process_id);
-        // espera por anúncio do líder vindo de outro processo
+        time_t wait_start = time(NULL);
+        while (time(NULL) - wait_start < 5) {
+            if (!election_in_progress) return; // líder foi anunciado
+            sleep(1);
+        }
+
+        // Se ninguém anunciou, tenta de novo
+        printf("⏱️ Ninguém anunciou líder. Processo %d reinicia eleição.\n", process_id);
+        election_in_progress = false;
+        initiate_election();
     }
 }
 

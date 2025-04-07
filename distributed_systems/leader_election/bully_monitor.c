@@ -83,11 +83,17 @@ void* listener_thread(void* arg) {
 
         if (strcmp(msg, "ELECTION") == 0) {
             printf("📨 Recebi ELECTION de %d\n", sender_id);
-            send_message(sender_id, "OK");
 
-            if (!election_in_progress) {
-                sleep(1);
-                initiate_election(); // responder também inicia nova eleição
+            // Se eu sou o líder, ignoro a eleição
+            if (leader_id == process_id) {
+                printf("👑 Eu sou o líder atual. Ignorando ELECTION de %d.\n", sender_id);
+            } else {
+                send_message(sender_id, "OK");
+
+                if (!election_in_progress) {
+                    sleep(1);
+                    initiate_election(); // responder também inicia nova eleição
+                }
             }
 
         } else if (strcmp(msg, "OK") == 0) {

@@ -1,6 +1,6 @@
 #!/bin/zsh
 
-SOURCE="bully_algorithm.c"
+SOURCE="bully_monitor.c"
 OUTPUT="bully"
 
 # Compilar se necessário
